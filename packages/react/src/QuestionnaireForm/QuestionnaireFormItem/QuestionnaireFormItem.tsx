@@ -33,6 +33,8 @@ import {
   QuestionnaireItemType,
 } from '../../utils/questionnaire';
 import { QuestionnaireFormContext } from '../QuestionnaireForm.context';
+import { QuestionnaireItemDisplay } from './QuestionnaireItemDisplay';
+
 
 export interface QuestionnaireFormItemProps {
   readonly item: QuestionnaireItem;
@@ -86,7 +88,7 @@ export function QuestionnaireFormItem(props: QuestionnaireFormItemProps): JSX.El
 
   switch (type) {
     case QuestionnaireItemType.display:
-      return <p key={props.item.linkId}>{props.item.text}</p>;
+      return <QuestionnaireItemDisplay item={item} />;
     case QuestionnaireItemType.boolean:
       return (
         <CheckboxFormSection key={props.item.linkId} title={props.item.text} htmlFor={props.item.linkId}>
