@@ -37,7 +37,7 @@ import { randomUUID } from 'node:crypto';
 import vm from 'node:vm';
 import { asyncWrap } from '../../async';
 import { runInLambda } from '../../cloud/aws/execute';
-import { getConfig } from '../../config';
+import { getConfig } from '../../config/loader';
 import { buildTracingExtension, getAuthenticatedContext } from '../../context';
 import { getLogger } from '../../logger';
 import { generateAccessToken } from '../../oauth/keys';
@@ -386,12 +386,15 @@ async function runInVmContext(request: BotExecutionContext): Promise<BotExecutio
   const botConsole = new MockConsole();
 
   const sandbox = {
+    console: botConsole,
+    fetch,
     require,
     ContentType,
     Hl7Message,
     MedplumClient,
-    fetch,
-    console: botConsole,
+    TextEncoder,
+    URL,
+    URLSearchParams,
     event: {
       bot: createReference(bot),
       baseUrl: config.vmContextBaseUrl ?? config.baseUrl,

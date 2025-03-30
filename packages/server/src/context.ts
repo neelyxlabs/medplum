@@ -1,8 +1,8 @@
 import { Logger, ProfileResource, isUUID, parseLogLevel } from '@medplum/core';
-import { Extension, Login, Project, ProjectMembership, Reference } from '@medplum/fhirtypes';
+import { Bot, ClientApplication, Extension, Login, Project, ProjectMembership, Reference } from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
 import { NextFunction, Request, Response } from 'express';
-import { getConfig } from './config';
+import { getConfig } from './config/loader';
 import { getRepoForLogin } from './fhir/accesspolicy';
 import { Repository, getSystemRepo } from './fhir/repo';
 import { AuthState, authenticateTokenImpl, isExtendedMode } from './oauth/middleware';
@@ -15,10 +15,12 @@ export class RequestContext implements IRequestContext {
   readonly traceId: string;
   readonly logger: Logger;
 
-  constructor(requestId: string, traceId: string, logger?: Logger) {
+  constructor(requestId: string, traceId: string, logger?: Logger, loggerMetadata?: Record<string, any>) {
     this.requestId = requestId;
     this.traceId = traceId;
-    this.logger = logger ?? new Logger(write, { requestId, traceId }, parseLogLevel(getConfig().logLevel ?? 'info'));
+    this.logger =
+      logger ??
+      new Logger(write, { ...loggerMetadata, requestId, traceId }, parseLogLevel(getConfig().logLevel ?? 'info'));
   }
 
   [Symbol.dispose](): void {
@@ -32,11 +34,17 @@ export class RequestContext implements IRequestContext {
 
 export class AuthenticatedRequestContext extends RequestContext {
   constructor(
-    ctx: RequestContext,
+    requestId: string,
+    traceId: string,
     readonly authState: Readonly<AuthState>,
-    readonly repo: Repository
+    readonly repo: Repository,
+    logger?: Logger
   ) {
-    super(ctx.requestId, ctx.traceId, ctx.logger);
+    let loggerMetadata: Record<string, any> | undefined;
+    if (repo.currentProject()?.id) {
+      loggerMetadata = { projectId: repo.currentProject()?.id };
+    }
+    super(requestId, traceId, logger, loggerMetadata);
   }
 
   get project(): Project {
@@ -44,15 +52,15 @@ export class AuthenticatedRequestContext extends RequestContext {
   }
 
   get membership(): ProjectMembership {
-    return this.authState.membership;
+    return this.authState.onBehalfOfMembership ?? this.authState.membership;
   }
 
   get login(): Login {
     return this.authState.login;
   }
 
-  get profile(): Reference<ProfileResource> {
-    return this.authState.membership.profile as Reference<ProfileResource>;
+  get profile(): Reference<ProfileResource | Bot | ClientApplication> {
+    return this.membership.profile;
   }
 
   [Symbol.dispose](): void {
@@ -61,9 +69,11 @@ export class AuthenticatedRequestContext extends RequestContext {
 
   static system(ctx?: { requestId?: string; traceId?: string }): AuthenticatedRequestContext {
     return new AuthenticatedRequestContext(
-      new RequestContext(ctx?.requestId ?? '', ctx?.traceId ?? '', systemLogger),
+      ctx?.requestId ?? '',
+      ctx?.traceId ?? '',
       {} as unknown as AuthState,
-      getSystemRepo()
+      getSystemRepo(),
+      systemLogger
     );
   }
 }
@@ -92,12 +102,13 @@ export async function attachRequestContext(req: Request, res: Response, next: Ne
   try {
     const { requestId, traceId } = requestIds(req);
 
-    let ctx = new RequestContext(requestId, traceId);
-
+    let ctx: RequestContext;
     const authState = await authenticateTokenImpl(req);
     if (authState) {
       const repo = await getRepoForLogin(authState, isExtendedMode(req));
-      ctx = new AuthenticatedRequestContext(ctx, authState, repo);
+      ctx = new AuthenticatedRequestContext(requestId, traceId, authState, repo);
+    } else {
+      ctx = new RequestContext(requestId, traceId);
     }
 
     requestContextStore.run(ctx, () => next());
